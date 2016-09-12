@@ -6,8 +6,9 @@ import (
 )
 
 var (
-	ErrDevicenotfound = errors.New("Device not found")
-	ErrNamenotfound   = errors.New("Thing does not have a name!")
+	ErrDevicenotfound        = errors.New("Device not found")
+	ErrNamenotfound          = errors.New("Thing does not have a name!")
+	ErrPresencenotconfigured = errors.New("No presence module detected!")
 )
 
 //The main instance of the hab
@@ -27,8 +28,9 @@ func NewHab(c *Config) (*Hab, error) {
 		c.ListenAddr = ":80"
 	}
 	h := &Hab{
-		config: c,
-		lights: make(map[string]Light),
+		config:   c,
+		lights:   make(map[string]Light),
+		presence: make(map[string]Presence),
 	}
 	//Initialize things...
 	for _, thing := range c.Things {
@@ -43,6 +45,16 @@ func NewHab(c *Config) (*Hab, error) {
 					return nil, err
 				}
 				h.lights[thing.Name] = m
+			} else {
+				return nil, errors.New("module " + thing.Module + " not found")
+			}
+		} else if thing.Type == "presence" {
+			if thing.Module == "arp" {
+				a, err := NewArp(thing.Args)
+				if err != nil {
+					return nil, err
+				}
+				h.presence[thing.Name] = a
 			} else {
 				return nil, errors.New("module " + thing.Module + " not found")
 			}
@@ -67,4 +79,31 @@ func (h *Hab) LightOff(name string) error {
 		return ErrDevicenotfound
 	}
 	return l.Off()
+}
+
+//OccupiedPresence checks a single named instance
+func (h *Hab) OccupiedPresence(name string) (bool, error) {
+	l, ok := h.presence[name]
+	if !ok {
+		return false, ErrDevicenotfound
+	}
+	return l.Occupied()
+}
+
+//Occupied checks all Presence modules and returns true if any of them are true
+func (h *Hab) Occupied() (res bool, err error) {
+	if len(h.presence) == 0 {
+		err = ErrPresencenotconfigured
+		return
+	}
+	var r bool
+	for _, l := range h.presence {
+		r, err = l.Occupied()
+		if err != nil {
+			return
+		}
+		res = res || r
+	}
+	//TODO: Implement grace: check state somewhere in a loop and cache it
+	return
 }
